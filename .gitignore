@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio / Rider
+.vs/
+*.user
+*.suo
+.idea/
+*.DotSettings.user
+
+# Local dev settings (ports, env vars — developer-specific)
+Properties/launchSettings.json
+
+# Claude Code local settings
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

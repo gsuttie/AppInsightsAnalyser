@@ -1,0 +1,970 @@
+@page "/dashboard"
+@inject AppStateService AppState
+@inject AppInsightsQueryService QueryService
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>Dashboard — @(AppState.SelectedInstance?.Name ?? "AppInsights Analyser")</PageTitle>
+
+@if (AppState.SelectedInstance is null)
+{
+    <MudContainer MaxWidth="MaxWidth.Small" Class="mt-8">
+        <MudAlert Severity="Severity.Warning">
+            No Application Insights instance selected.
+            <MudLink Href="/" Class="ml-2">Go back to Home</MudLink>
+        </MudAlert>
+    </MudContainer>
+    return;
+}
+
+<MudContainer MaxWidth="MaxWidth.ExtraExtraLarge" Class="mt-16 px-4">
+
+    <!-- Header row -->
+    <MudStack Row="true" AlignItems="AlignItems.Center" Wrap="Wrap.Wrap" Class="mb-3">
+        <MudText Typo="Typo.h5">
+            <MudIcon Icon="@Icons.Material.Filled.BarChart" Class="mr-1" />
+            @AppState.SelectedInstance.Name
+        </MudText>
+        <MudSpacer />
+        <MudSelect T="string" Label="Time Range"
+                   Value="_timeRange"
+                   ValueChanged="@OnTimeRangeChanged"
+                   Variant="Variant.Outlined" Dense="true" Style="width:140px;">
+            <MudSelectItem T="string" Value="@("1h")">Last 1 hour</MudSelectItem>
+            <MudSelectItem T="string" Value="@("6h")">Last 6 hours</MudSelectItem>
+            <MudSelectItem T="string" Value="@("24h")">Last 24 hours</MudSelectItem>
+            <MudSelectItem T="string" Value="@("7d")">Last 7 days</MudSelectItem>
+            <MudSelectItem T="string" Value="@("30d")">Last 30 days</MudSelectItem>
+        </MudSelect>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                   OnClick="@LoadAllData" Disabled="@_loading" Class="ml-2">
+            Refresh
+        </MudButton>
+    </MudStack>
+
+    @if (_errorMessage is not null)
+    {
+        <MudAlert Severity="Severity.Error" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = null)" Class="mb-3">
+            @_errorMessage
+        </MudAlert>
+    }
+
+    <!-- Summary Cards -->
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" sm="6" md="3">
+            <SummaryCard Title="Total Requests" Value="@(_summary?.TotalRequests.ToString("N0") ?? "—")"
+                         Icon="@Icons.Material.Filled.Http" Color="Color.Primary" Loading="@_loadingSummary" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <SummaryCard Title="Total Exceptions" Value="@(_summary?.TotalExceptions.ToString("N0") ?? "—")"
+                         Icon="@Icons.Material.Filled.BugReport" Color="Color.Error" Loading="@_loadingSummary" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <SummaryCard Title="Availability" Value="@(_summary is not null ? $"{_summary.AvailabilityPct:F1}%" : "—")"
+                         Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Loading="@_loadingSummary" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <SummaryCard Title="Page Views" Value="@(_summary?.TotalPageViews.ToString("N0") ?? "—")"
+                         Icon="@Icons.Material.Filled.Visibility" Color="Color.Info" Loading="@_loadingSummary" />
+        </MudItem>
+    </MudGrid>
+
+    <!-- Section Content -->
+    <MudPaper Elevation="2" Class="pa-4">
+
+        @if (AppState.ActiveSection == "overview")
+        {
+            <MudGrid>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.h6" Class="mb-2">Top Requests</MudText>
+                    @if (_loadingRequests)
+                    { <MudProgressCircular Indeterminate="true" /> }
+                    else if (_requests.Count == 0)
+                    { <EmptyState /> }
+                    else
+                    {
+                        <ApexChart TItem="RequestResult" Title="" Height="250">
+                            <ApexPointSeries TItem="RequestResult" Items="_requests.Take(8).ToList()"
+                                             Name="Requests" SeriesType="SeriesType.Bar"
+                                             XValue="@(r => r.Name.Length > 30 ? r.Name[..30] + "…" : r.Name)"
+                                             YValue="@(r => (decimal)r.Count)" />
+                        </ApexChart>
+                    }
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudText Typo="Typo.h6" Class="mb-2">Exceptions by Type</MudText>
+                    @if (_loadingExceptions)
+                    { <MudProgressCircular Indeterminate="true" /> }
+                    else if (_exceptions.Count == 0)
+                    { <EmptyState /> }
+                    else
+                    {
+                        <ApexChart TItem="ExceptionResult" Title="" Height="250">
+                            <ApexPointSeries TItem="ExceptionResult" Items="_exceptions.Take(8).ToList()"
+                                             Name="Exceptions" SeriesType="SeriesType.Donut"
+                                             XValue="@(e => e.Type.Length > 30 ? e.Type[..30] + "…" : e.Type)"
+                                             YValue="@(e => (decimal)e.Count)" />
+                        </ApexChart>
+                    }
+                </MudItem>
+            </MudGrid>
+        }
+        else if (AppState.ActiveSection == "requests")
+        {
+            @if (_loadingRequests)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_requestsError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_requestsError</MudAlert> }
+            else if (_requests.Count == 0)
+            { <EmptyState Message="No request data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="RequestResult" Title="Top Requests by Count" Height="300">
+                    <ApexPointSeries TItem="RequestResult" Items="_requests"
+                                     Name="Count" SeriesType="SeriesType.Bar"
+                                     XValue="@(r => r.Name.Length > 40 ? r.Name[..40] + "…" : r.Name)"
+                                     YValue="@(r => (decimal)r.Count)" />
+                </ApexChart>
+                <MudTable Items="_requests" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<RequestResult, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<RequestResult, object>(x => x.Count)">Count</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<RequestResult, object>(x => x.FailedCount)">Failed</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<RequestResult, object>(x => x.AvgDuration)">Avg Duration (ms)</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">@context.Name</MudTd>
+                        <MudTd DataLabel="Count">@context.Count.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Failed">
+                            @if (context.FailedCount > 0)
+                            {
+                                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                                           OnClick="@(() => OnFailedCountClick(context))">
+                                    @context.FailedCount.ToString("N0")
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudText>0</MudText>
+                            }
+                        </MudTd>
+                        <MudTd DataLabel="Avg Duration">@context.AvgDuration.ToString("F1")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+
+                @if (_failedRequestsRow is not null)
+                {
+                    <MudPaper Elevation="2" Class="pa-4 mt-2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+                            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" />
+                            <MudText Typo="Typo.h6">Failed Requests</MudText>
+                            <MudText Typo="Typo.body2" Class="ml-2" Style="opacity:0.7">@_failedRequestsRow.Name</MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                           OnClick="@(() => { _failedRequestsRow = null; _failedRequestDetails = []; _failedRequestsError = null; })" />
+                        </MudStack>
+                        @if (_loadingFailedRequests)
+                        {
+                            <MudProgressLinear Indeterminate="true" />
+                        }
+                        else if (_failedRequestsError is not null)
+                        {
+                            <MudAlert Severity="Severity.Error">Failed to load details: @_failedRequestsError</MudAlert>
+                        }
+                        else
+                        {
+                            <MudTable Items="_failedRequestDetails" Dense="true" Hover="true" Striped="true" Bordered="true" T="FailedRequestDetail">
+                                <HeaderContent>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.Timestamp)">Timestamp</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.ResultCode)">Result Code</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.Duration)">Duration (ms)</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.Url)">URL</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.OperationId)">Operation ID</MudTableSortLabel></MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd DataLabel="Timestamp">@context.Timestamp.LocalDateTime.ToString("dd MMM HH:mm:ss")</MudTd>
+                                    <MudTd DataLabel="Result Code">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Error">@context.ResultCode</MudChip>
+                                    </MudTd>
+                                    <MudTd DataLabel="Duration">@context.Duration.ToString("F0")</MudTd>
+                                    <MudTd DataLabel="URL"><MudText Typo="Typo.body2" Style="word-break:break-all">@(string.IsNullOrEmpty(context.Url) ? "—" : context.Url)</MudText></MudTd>
+                                    <MudTd DataLabel="Operation ID"><MudText Typo="Typo.caption" Style="font-family:monospace">@(string.IsNullOrEmpty(context.OperationId) ? "—" : context.OperationId)</MudText></MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                    </MudPaper>
+                }
+            }
+        }
+        else if (AppState.ActiveSection == "dependencies")
+        {
+            @if (_loadingDependencies)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_dependenciesError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_dependenciesError</MudAlert> }
+            else if (_dependencies.Count == 0)
+            { <EmptyState Message="No dependency data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="DependencyResult" Title="Top Dependencies by Count" Height="300">
+                    <ApexPointSeries TItem="DependencyResult" Items="_dependencies"
+                                     Name="Count" SeriesType="SeriesType.Bar"
+                                     XValue="@(d => d.Name.Length > 40 ? d.Name[..40] + "…" : d.Name)"
+                                     YValue="@(d => (decimal)d.Count)" />
+                </ApexChart>
+                <MudTable Items="_dependencies" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<DependencyResult, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<DependencyResult, object>(x => x.Type)">Type</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<DependencyResult, object>(x => x.Count)">Count</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<DependencyResult, object>(x => x.AvgDuration)">Avg Duration (ms)</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">@context.Name</MudTd>
+                        <MudTd DataLabel="Type">@context.Type</MudTd>
+                        <MudTd DataLabel="Count">@context.Count.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Avg Duration">@context.AvgDuration.ToString("F1")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+        else if (AppState.ActiveSection == "exceptions")
+        {
+            @if (_loadingExceptions)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_exceptionsError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_exceptionsError</MudAlert> }
+            else if (_exceptions.Count == 0)
+            { <EmptyState Message="No exception data found for this time range." /> }
+            else
+            {
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <ApexChart TItem="ExceptionResult" Title="Exceptions by Type" Height="350">
+                            <ApexPointSeries TItem="ExceptionResult" Items="_exceptions"
+                                             Name="Count" SeriesType="SeriesType.Donut"
+                                             XValue="@(e => e.Type.Length > 35 ? e.Type[..35] + "…" : e.Type)"
+                                             YValue="@(e => (decimal)e.Count)" />
+                        </ApexChart>
+                    </MudItem>
+                </MudGrid>
+                <MudTable Items="_exceptions" Dense="true" Hover="true" Striped="true" Bordered="true"
+                          T="ExceptionResult" OnRowClick="OnExceptionRowClick" RowClass="cursor-pointer">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<ExceptionResult, object>(x => x.Type)">Type</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<ExceptionResult, object>(x => x.Message)">Message</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<ExceptionResult, object>(x => x.Count)">Count</MudTableSortLabel></MudTh>
+                        <MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Type"><MudText Typo="Typo.body2" Style="word-break:break-all">@context.Type</MudText></MudTd>
+                        <MudTd DataLabel="Message">@context.Message</MudTd>
+                        <MudTd DataLabel="Count">@context.Count.ToString("N0")</MudTd>
+                        <MudTd Style="width:32px">
+                            <MudIcon Icon="@(_selectedExceptionRow == context ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                     Size="Size.Small" />
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+
+                @if (_selectedExceptionRow is not null)
+                {
+                    <MudPaper Elevation="2" Class="pa-4 mt-2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                            <MudIcon Icon="@Icons.Material.Filled.BugReport" Color="Color.Error" />
+                            <MudText Typo="Typo.h6">Recent Occurrences</MudText>
+                            <MudText Typo="Typo.body2" Class="ml-2" Style="opacity:0.7">@_selectedExceptionRow.Type</MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                           OnClick="@(() => { _selectedExceptionRow = null; _exceptionDetails = []; })" />
+                        </MudStack>
+                        @if (_loadingExceptionDetail)
+                        {
+                            <MudProgressLinear Indeterminate="true" />
+                        }
+                        else if (_exceptionDetails.Count == 0)
+                        {
+                            <MudText>No individual occurrences found.</MudText>
+                        }
+                        else
+                        {
+                            <MudTable Items="_exceptionDetails" Dense="true" Hover="true" Striped="true" Bordered="true" T="ExceptionDetail">
+                                <HeaderContent>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<ExceptionDetail, object>(x => x.Timestamp)">Timestamp</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<ExceptionDetail, object>(x => x.OperationName)">Operation</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<ExceptionDetail, object>(x => x.InnermostType)">Innermost Type</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<ExceptionDetail, object>(x => x.InnermostMessage)">Innermost Message</MudTableSortLabel></MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd DataLabel="Timestamp">@context.Timestamp.LocalDateTime.ToString("dd MMM HH:mm:ss")</MudTd>
+                                    <MudTd DataLabel="Operation">@(string.IsNullOrEmpty(context.OperationName) ? "—" : context.OperationName)</MudTd>
+                                    <MudTd DataLabel="Innermost Type"><MudText Typo="Typo.body2" Style="word-break:break-all">@(string.IsNullOrEmpty(context.InnermostType) ? "—" : context.InnermostType)</MudText></MudTd>
+                                    <MudTd DataLabel="Innermost Message">@(string.IsNullOrEmpty(context.InnermostMessage) ? context.OuterMessage : context.InnermostMessage)</MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                    </MudPaper>
+                }
+            }
+        }
+        else if (AppState.ActiveSection == "page-views")
+        {
+            @if (_loadingPageViews)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_pageViewsError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_pageViewsError</MudAlert> }
+            else if (_pageViews.Count == 0)
+            { <EmptyState Message="No page view data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="PageViewResult" Title="Top Page Views by Count" Height="300">
+                    <ApexPointSeries TItem="PageViewResult" Items="_pageViews"
+                                     Name="Count" SeriesType="SeriesType.Bar"
+                                     XValue="@(p => p.Name.Length > 40 ? p.Name[..40] + "…" : p.Name)"
+                                     YValue="@(p => (decimal)p.Count)" />
+                </ApexChart>
+                <MudTable Items="_pageViews" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageViewResult, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageViewResult, object>(x => x.Count)">Count</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageViewResult, object>(x => x.AvgDuration)">Avg Duration (ms)</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">@context.Name</MudTd>
+                        <MudTd DataLabel="Count">@context.Count.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Avg Duration">@context.AvgDuration.ToString("F1")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+        else if (AppState.ActiveSection == "page-speed")
+        {
+            @if (_loadingPageSpeed)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_pageSpeedError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_pageSpeedError</MudAlert> }
+            else if (_pageSpeed.Count == 0)
+            { <EmptyState Message="No page view data found for today or yesterday." /> }
+            else
+            {
+                <ApexChart TItem="PageSpeedResult" Title="Avg Page Load Time: Today vs Yesterday (ms)" Height="320">
+                    <ApexPointSeries TItem="PageSpeedResult" Items="_pageSpeed"
+                                     Name="Today (ms)" SeriesType="SeriesType.Bar"
+                                     XValue="@(p => p.Name.Length > 40 ? p.Name[..40] + "…" : p.Name)"
+                                     YValue="@(p => Math.Round((decimal)(p.TodayMs ?? 0), 2))" />
+                    <ApexPointSeries TItem="PageSpeedResult" Items="_pageSpeed"
+                                     Name="Yesterday (ms)" SeriesType="SeriesType.Bar"
+                                     XValue="@(p => p.Name.Length > 40 ? p.Name[..40] + "…" : p.Name)"
+                                     YValue="@(p => Math.Round((decimal)(p.YesterdayMs ?? 0), 2))" />
+                </ApexChart>
+                <MudTable Items="_pageSpeed" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageSpeedResult, object>(x => x.Name)">Page</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageSpeedResult, object>(x => x.YesterdayMs ?? double.MaxValue)">Yesterday (ms)</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageSpeedResult, object>(x => x.TodayMs ?? double.MaxValue)">Today (ms)</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageSpeedResult, object>(x => x.ChangeMs ?? double.MaxValue)">Change (ms)</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PageSpeedResult, object>(x => x.ChangePct ?? double.MaxValue)">Change %</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Page"><MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText></MudTd>
+                        <MudTd DataLabel="Yesterday">@(context.YesterdayMs.HasValue ? context.YesterdayMs.Value.ToString("F0") : "—")</MudTd>
+                        <MudTd DataLabel="Today">@(context.TodayMs.HasValue ? context.TodayMs.Value.ToString("F0") : "—")</MudTd>
+                        <MudTd DataLabel="Change">
+                            @if (context.ChangeMs.HasValue)
+                            {
+                                <MudText Color="@(context.ChangeMs > 0 ? Color.Error : context.ChangeMs < 0 ? Color.Success : Color.Default)">
+                                    @(context.ChangeMs > 0 ? "+" : "")@context.ChangeMs.Value.ToString("F0")
+                                </MudText>
+                            }
+                            else { <MudText>—</MudText> }
+                        </MudTd>
+                        <MudTd DataLabel="Change %">
+                            @if (context.ChangePct.HasValue)
+                            {
+                                <MudText Color="@(context.ChangePct > 0 ? Color.Error : context.ChangePct < 0 ? Color.Success : Color.Default)">
+                                    @(context.ChangePct > 0 ? "+" : "")@context.ChangePct.Value.ToString("F1")%
+                                </MudText>
+                            }
+                            else { <MudText>—</MudText> }
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+        else if (AppState.ActiveSection == "availability")
+        {
+            @if (_loadingAvailability)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_availabilityError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_availabilityError</MudAlert> }
+            else if (_availability.Count == 0)
+            { <EmptyState Message="No availability data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="AvailabilityResult" Title="Availability % by Test" Height="300">
+                    <ApexPointSeries TItem="AvailabilityResult" Items="_availability"
+                                     Name="Availability %" SeriesType="SeriesType.Bar"
+                                     XValue="@(a => a.TestName)"
+                                     YValue="@(a => (decimal)a.AvailabilityPct)" />
+                </ApexChart>
+                <MudTable Items="_availability" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<AvailabilityResult, object>(x => x.TestName)">Test Name</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<AvailabilityResult, object>(x => x.PassedCount)">Passed</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<AvailabilityResult, object>(x => x.TotalCount)">Total</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<AvailabilityResult, object>(x => x.AvailabilityPct)">Availability %</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Test Name">@context.TestName</MudTd>
+                        <MudTd DataLabel="Passed">@context.PassedCount.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Total">@context.TotalCount.ToString("N0")</MudTd>
+                        <MudTd DataLabel="Availability %">
+                            <MudText Color="@(context.AvailabilityPct >= 99 ? Color.Success : context.AvailabilityPct >= 95 ? Color.Warning : Color.Error)">
+                                @context.AvailabilityPct.ToString("F2")%
+                            </MudText>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+        else if (AppState.ActiveSection == "traces")
+        {
+            @if (_loadingTraces)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_tracesError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_tracesError</MudAlert> }
+            else if (_traces.Count == 0)
+            { <EmptyState Message="No trace data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="TraceResult" Title="Traces by Severity" Height="300">
+                    <ApexPointSeries TItem="TraceResult" Items="_traces"
+                                     Name="Count" SeriesType="SeriesType.Bar"
+                                     XValue="@(t => t.SeverityName)"
+                                     YValue="@(t => (decimal)t.Count)" />
+                </ApexChart>
+                <MudTable Items="_traces" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<TraceResult, object>(x => x.SeverityName)">Severity</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<TraceResult, object>(x => x.SeverityLevel)">Level</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<TraceResult, object>(x => x.Count)">Count</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Severity">@context.SeverityName</MudTd>
+                        <MudTd DataLabel="Level">@context.SeverityLevel</MudTd>
+                        <MudTd DataLabel="Count">@context.Count.ToString("N0")</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+        else if (AppState.ActiveSection == "failures")
+        {
+            @if (_loadingFailures)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_failuresError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_failuresError</MudAlert> }
+            else if (_failures.Count == 0)
+            { <EmptyState Message="No failure data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="FailureResult" Title="Top 10 Failures" Height="300">
+                    <ApexPointSeries TItem="FailureResult" Items="_failures"
+                                     Name="Failures" SeriesType="SeriesType.Bar"
+                                     XValue="@(f => f.Name.Length > 40 ? f.Name[..40] + "…" : f.Name)"
+                                     YValue="@(f => (decimal)f.FailCount)" />
+                </ApexChart>
+                <MudTable Items="_failures" Dense="true" Hover="true" Striped="true" Bordered="true">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<FailureResult, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<FailureResult, object>(x => x.ResultCode)">Result Code</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<FailureResult, object>(x => x.FailCount)">Fail Count</MudTableSortLabel></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">@context.Name</MudTd>
+                        <MudTd DataLabel="Result Code">@context.ResultCode</MudTd>
+                        <MudTd DataLabel="Fail Count">
+                            <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                                       OnClick="@(() => OnFailureCountClick(context))">
+                                @context.FailCount.ToString("N0")
+                            </MudButton>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+
+                @if (_failureOccurrencesRow is not null)
+                {
+                    <MudPaper Elevation="2" Class="pa-4 mt-2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+                            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" />
+                            <MudText Typo="Typo.h6">Failure Occurrences</MudText>
+                            <MudText Typo="Typo.body2" Class="ml-2" Style="opacity:0.7">
+                                @_failureOccurrencesRow.Name — @_failureOccurrencesRow.ResultCode
+                            </MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                           OnClick="@(() => { _failureOccurrencesRow = null; _failureOccurrences = []; _failureOccurrencesError = null; })" />
+                        </MudStack>
+                        @if (_loadingFailureOccurrences)
+                        {
+                            <MudProgressLinear Indeterminate="true" />
+                        }
+                        else if (_failureOccurrencesError is not null)
+                        {
+                            <MudAlert Severity="Severity.Error">Failed to load details: @_failureOccurrencesError</MudAlert>
+                        }
+                        else
+                        {
+                            <MudTable Items="_failureOccurrences" Dense="true" Hover="true" Striped="true" Bordered="true" T="FailedRequestDetail">
+                                <HeaderContent>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.Timestamp)">Timestamp</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.ResultCode)">Result Code</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.Duration)">Duration (ms)</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.Url)">URL</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<FailedRequestDetail, object>(x => x.OperationId)">Operation ID</MudTableSortLabel></MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd DataLabel="Timestamp">@context.Timestamp.LocalDateTime.ToString("dd MMM HH:mm:ss")</MudTd>
+                                    <MudTd DataLabel="Result Code">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Error">@context.ResultCode</MudChip>
+                                    </MudTd>
+                                    <MudTd DataLabel="Duration">@context.Duration.ToString("F0")</MudTd>
+                                    <MudTd DataLabel="URL"><MudText Typo="Typo.body2" Style="word-break:break-all">@(string.IsNullOrEmpty(context.Url) ? "—" : context.Url)</MudText></MudTd>
+                                    <MudTd DataLabel="Operation ID"><MudText Typo="Typo.caption" Style="font-family:monospace">@(string.IsNullOrEmpty(context.OperationId) ? "—" : context.OperationId)</MudText></MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                    </MudPaper>
+                }
+            }
+        }
+        else if (AppState.ActiveSection == "performance")
+        {
+            @if (_loadingPerformance)
+            { <MudProgressLinear Indeterminate="true" /> }
+            else if (_performanceError is not null)
+            { <MudAlert Severity="Severity.Error" Class="mb-2">@_performanceError</MudAlert> }
+            else if (_performance.Count == 0)
+            { <EmptyState Message="No performance data found for this time range." /> }
+            else
+            {
+                <ApexChart TItem="PerformanceResult" Title="Top 10 Slowest Requests (ms)" Height="350">
+                    <ApexPointSeries TItem="PerformanceResult" Items="_performance"
+                                     Name="Avg Duration" SeriesType="SeriesType.Bar"
+                                     XValue="@(p => p.Name.Length > 40 ? p.Name[..40] + "…" : p.Name)"
+                                     YValue="@(p => Math.Round((decimal)p.AvgDuration, 2))" />
+                    <ApexPointSeries TItem="PerformanceResult" Items="_performance"
+                                     Name="P95 Duration" SeriesType="SeriesType.Bar"
+                                     XValue="@(p => p.Name.Length > 40 ? p.Name[..40] + "…" : p.Name)"
+                                     YValue="@(p => Math.Round((decimal)p.P95Duration, 2))" />
+                </ApexChart>
+                <MudTable Items="_performance" Dense="true" Hover="true" Striped="true" Bordered="true"
+                          T="PerformanceResult" OnRowClick="OnPerformanceRowClick" RowClass="cursor-pointer">
+                    <HeaderContent>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceResult, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceResult, object>(x => x.AvgDuration)">Avg Duration (ms)</MudTableSortLabel></MudTh>
+                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceResult, object>(x => x.P95Duration)">P95 Duration (ms)</MudTableSortLabel></MudTh>
+                        <MudTh></MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="Name">@context.Name</MudTd>
+                        <MudTd DataLabel="Avg Duration">@context.AvgDuration.ToString("F1")</MudTd>
+                        <MudTd DataLabel="P95 Duration">@context.P95Duration.ToString("F1")</MudTd>
+                        <MudTd Style="width:32px">
+                            <MudIcon Icon="@(_selectedPerformanceRow == context ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                     Size="Size.Small" />
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+
+                @if (_selectedPerformanceRow is not null)
+                {
+                    <MudPaper Elevation="2" Class="pa-4 mt-2">
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+                            <MudIcon Icon="@Icons.Material.Filled.Speed" Color="Color.Warning" />
+                            <MudText Typo="Typo.h6">Performance Drilldown</MudText>
+                            <MudText Typo="Typo.body2" Class="ml-2" Style="opacity:0.7">@_selectedPerformanceRow.Name</MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                           OnClick="@(() => { _selectedPerformanceRow = null; _performanceDrilldown = null; _performanceDrilldownError = null; })" />
+                        </MudStack>
+                        @if (_loadingPerformanceDrilldown)
+                        {
+                            <MudProgressLinear Indeterminate="true" />
+                        }
+                        else if (_performanceDrilldownError is not null)
+                        {
+                            <MudAlert Severity="Severity.Error">Failed to load drilldown: @_performanceDrilldownError</MudAlert>
+                        }
+                        else if (_performanceDrilldown is not null)
+                        {
+                            <MudText Typo="Typo.subtitle1" Class="mb-2"><strong>Latency Percentiles</strong> (@_performanceDrilldown.Percentiles.TotalCount.ToString("N0") total requests)</MudText>
+                            <MudGrid Class="mb-4">
+                                @foreach (var (label, value) in new[] {
+                                    ("P50", _performanceDrilldown.Percentiles.P50),
+                                    ("P75", _performanceDrilldown.Percentiles.P75),
+                                    ("P90", _performanceDrilldown.Percentiles.P90),
+                                    ("P95", _performanceDrilldown.Percentiles.P95),
+                                    ("P99", _performanceDrilldown.Percentiles.P99) })
+                                {
+                                    <MudItem xs="6" sm="4" md="2">
+                                        <MudPaper Elevation="1" Class="pa-3 text-center">
+                                            <MudText Typo="Typo.caption" Style="opacity:0.7">@label</MudText>
+                                            <MudText Typo="Typo.h6" Color="@(value > _selectedPerformanceRow.P95Duration ? Color.Error : value > _selectedPerformanceRow.AvgDuration ? Color.Warning : Color.Success)">
+                                                @value.ToString("F0") ms
+                                            </MudText>
+                                        </MudPaper>
+                                    </MudItem>
+                                }
+                            </MudGrid>
+
+                            @if (_performanceDrilldown.Dependencies.Count > 0)
+                            {
+                                <MudText Typo="Typo.subtitle1" Class="mb-2"><strong>Dependency Breakdown</strong> <MudChip T="string" Size="Size.Small" Color="Color.Info">Root cause candidates</MudChip></MudText>
+                                <MudTable Items="_performanceDrilldown.Dependencies" Dense="true" Hover="true" Striped="true" Bordered="true" Class="mb-4" T="PerformanceDependencySummary">
+                                    <HeaderContent>
+                                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceDependencySummary, object>(x => x.Type)">Type</MudTableSortLabel></MudTh>
+                                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceDependencySummary, object>(x => x.Name)">Name</MudTableSortLabel></MudTh>
+                                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceDependencySummary, object>(x => x.Count)">Calls</MudTableSortLabel></MudTh>
+                                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceDependencySummary, object>(x => x.AvgDuration)">Avg (ms)</MudTableSortLabel></MudTh>
+                                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceDependencySummary, object>(x => x.P95Duration)">P95 (ms)</MudTableSortLabel></MudTh>
+                                        <MudTh><MudTableSortLabel SortBy="new Func<PerformanceDependencySummary, object>(x => x.MaxDuration)">Max (ms)</MudTableSortLabel></MudTh>
+                                    </HeaderContent>
+                                    <RowTemplate>
+                                        <MudTd DataLabel="Type"><MudChip T="string" Size="Size.Small">@context.Type</MudChip></MudTd>
+                                        <MudTd DataLabel="Name"><MudText Typo="Typo.body2" Style="word-break:break-all">@context.Name</MudText></MudTd>
+                                        <MudTd DataLabel="Calls">@context.Count.ToString("N0")</MudTd>
+                                        <MudTd DataLabel="Avg">
+                                            <MudText Color="@(context.AvgDuration > 1000 ? Color.Error : context.AvgDuration > 300 ? Color.Warning : Color.Default)">
+                                                @context.AvgDuration.ToString("F1")
+                                            </MudText>
+                                        </MudTd>
+                                        <MudTd DataLabel="P95">@context.P95Duration.ToString("F1")</MudTd>
+                                        <MudTd DataLabel="Max">
+                                            <MudText Color="@(context.MaxDuration > 5000 ? Color.Error : Color.Default)">
+                                                @context.MaxDuration.ToString("F1")
+                                            </MudText>
+                                        </MudTd>
+                                    </RowTemplate>
+                                </MudTable>
+                            }
+                            else
+                            {
+                                <MudAlert Severity="Severity.Info" Class="mb-4">No dependency data found for this operation — slowness may be CPU/memory bound.</MudAlert>
+                            }
+
+                            <MudText Typo="Typo.subtitle1" Class="mb-2"><strong>25 Slowest Individual Requests</strong></MudText>
+                            <MudTable Items="_performanceDrilldown.Occurrences" Dense="true" Hover="true" Striped="true" Bordered="true" T="PerformanceOccurrence">
+                                <HeaderContent>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<PerformanceOccurrence, object>(x => x.Timestamp)">Timestamp</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<PerformanceOccurrence, object>(x => x.Duration)">Duration (ms)</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<PerformanceOccurrence, object>(x => x.ResultCode)">Result Code</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<PerformanceOccurrence, object>(x => x.Success)">Success</MudTableSortLabel></MudTh>
+                                    <MudTh><MudTableSortLabel SortBy="new Func<PerformanceOccurrence, object>(x => x.Url)">URL</MudTableSortLabel></MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd DataLabel="Timestamp">@context.Timestamp.LocalDateTime.ToString("dd MMM HH:mm:ss")</MudTd>
+                                    <MudTd DataLabel="Duration">
+                                        <MudText Color="@(context.Duration > _performanceDrilldown.Percentiles.P95 ? Color.Error : context.Duration > _performanceDrilldown.Percentiles.P75 ? Color.Warning : Color.Default)">
+                                            <strong>@context.Duration.ToString("F0")</strong>
+                                        </MudText>
+                                    </MudTd>
+                                    <MudTd DataLabel="Result Code">@context.ResultCode</MudTd>
+                                    <MudTd DataLabel="Success">
+                                        <MudIcon Icon="@(context.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                                 Color="@(context.Success ? Color.Success : Color.Error)" Size="Size.Small" />
+                                    </MudTd>
+                                    <MudTd DataLabel="URL"><MudText Typo="Typo.body2" Style="word-break:break-all">@(string.IsNullOrEmpty(context.Url) ? "—" : context.Url)</MudText></MudTd>
+                                </RowTemplate>
+                            </MudTable>
+                        }
+                    </MudPaper>
+                }
+            }
+        }
+
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string _timeRange = "24h";
+    private bool _loading;
+    private string? _errorMessage;
+
+    private DashboardSummary? _summary;
+    private List<RequestResult> _requests = [];
+    private List<DependencyResult> _dependencies = [];
+    private List<ExceptionResult> _exceptions = [];
+    private List<PageViewResult> _pageViews = [];
+    private List<PageSpeedResult> _pageSpeed = [];
+    private List<AvailabilityResult> _availability = [];
+    private List<TraceResult> _traces = [];
+    private List<FailureResult> _failures = [];
+    private List<PerformanceResult> _performance = [];
+
+    private bool _loadingSummary, _loadingRequests, _loadingDependencies, _loadingExceptions;
+    private bool _loadingPageViews, _loadingPageSpeed, _loadingAvailability, _loadingTraces;
+    private bool _loadingFailures, _loadingPerformance;
+
+    private RequestResult? _failedRequestsRow;
+    private List<FailedRequestDetail> _failedRequestDetails = [];
+    private bool _loadingFailedRequests;
+    private string? _failedRequestsError;
+
+    private FailureResult? _failureOccurrencesRow;
+    private List<FailedRequestDetail> _failureOccurrences = [];
+    private bool _loadingFailureOccurrences;
+    private string? _failureOccurrencesError;
+
+    private ExceptionResult? _selectedExceptionRow;
+    private List<ExceptionDetail> _exceptionDetails = [];
+    private bool _loadingExceptionDetail;
+
+    private PerformanceResult? _selectedPerformanceRow;
+    private PerformanceDrilldown? _performanceDrilldown;
+    private bool _loadingPerformanceDrilldown;
+    private string? _performanceDrilldownError;
+
+    private string? _summaryError;
+    private string? _requestsError;
+    private string? _dependenciesError;
+    private string? _exceptionsError;
+    private string? _pageViewsError;
+    private string? _pageSpeedError;
+    private string? _availabilityError;
+    private string? _tracesError;
+    private string? _failuresError;
+    private string? _performanceError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        AppState.OnChange += OnStateChanged;
+        if (AppState.SelectedInstance is not null)
+            await LoadAllData();
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnTimeRangeChanged(string value)
+    {
+        _timeRange = value;
+        await LoadAllData();
+    }
+
+    private async Task OnFailedCountClick(RequestResult item)
+    {
+        if (_failedRequestsRow == item)
+        {
+            _failedRequestsRow = null;
+            _failedRequestDetails = [];
+            return;
+        }
+
+        _failedRequestsRow = item;
+        _failedRequestDetails = [];
+        _failedRequestsError = null;
+        _loadingFailedRequests = true;
+        StateHasChanged();
+
+        var resourceId = AppState.SelectedInstance!.ResourceId;
+        try { _failedRequestDetails = await QueryService.GetFailedRequestDetailsAsync(resourceId, _timeRange, item.Name); }
+        catch (Exception ex) { _failedRequestsError = ex.Message; }
+        finally { _loadingFailedRequests = false; StateHasChanged(); }
+    }
+
+    private async Task OnFailureCountClick(FailureResult item)
+    {
+        if (_failureOccurrencesRow == item)
+        {
+            _failureOccurrencesRow = null;
+            _failureOccurrences = [];
+            return;
+        }
+
+        _failureOccurrencesRow = item;
+        _failureOccurrences = [];
+        _failureOccurrencesError = null;
+        _loadingFailureOccurrences = true;
+        StateHasChanged();
+
+        var resourceId = AppState.SelectedInstance!.ResourceId;
+        try { _failureOccurrences = await QueryService.GetFailureOccurrencesAsync(resourceId, _timeRange, item.Name, item.ResultCode); }
+        catch (Exception ex) { _failureOccurrencesError = ex.Message; }
+        finally { _loadingFailureOccurrences = false; StateHasChanged(); }
+    }
+
+    private async Task OnPerformanceRowClick(TableRowClickEventArgs<PerformanceResult> args)
+    {
+        var item = args.Item;
+        if (_selectedPerformanceRow == item)
+        {
+            _selectedPerformanceRow = null;
+            _performanceDrilldown = null;
+            return;
+        }
+
+        _selectedPerformanceRow = item;
+        _performanceDrilldown = null;
+        _performanceDrilldownError = null;
+        _loadingPerformanceDrilldown = true;
+        StateHasChanged();
+
+        var resourceId = AppState.SelectedInstance!.ResourceId;
+        try { _performanceDrilldown = await QueryService.GetPerformanceDrilldownAsync(resourceId, _timeRange, item.Name); }
+        catch (Exception ex) { _performanceDrilldownError = ex.Message; }
+        finally { _loadingPerformanceDrilldown = false; StateHasChanged(); }
+    }
+
+    private async Task OnExceptionRowClick(TableRowClickEventArgs<ExceptionResult> args)
+    {
+        var item = args.Item;
+        if (_selectedExceptionRow == item)
+        {
+            _selectedExceptionRow = null;
+            _exceptionDetails = [];
+            return;
+        }
+
+        _selectedExceptionRow = item;
+        _exceptionDetails = [];
+        _loadingExceptionDetail = true;
+        StateHasChanged();
+
+        var resourceId = AppState.SelectedInstance!.ResourceId;
+        try { _exceptionDetails = await QueryService.GetExceptionDetailAsync(resourceId, _timeRange, item.Type, item.Message); }
+        catch { _exceptionDetails = []; }
+        finally { _loadingExceptionDetail = false; StateHasChanged(); }
+    }
+
+    private async Task LoadAllData()
+    {
+        if (AppState.SelectedInstance is null) return;
+
+        _loading = true;
+        _errorMessage = null;
+        _summaryError = _requestsError = _dependenciesError = _exceptionsError =
+        _pageViewsError = _pageSpeedError = _availabilityError = _tracesError = _failuresError = _performanceError = null;
+        _selectedExceptionRow = null;
+        _exceptionDetails = [];
+        _selectedPerformanceRow = null;
+        _performanceDrilldown = null;
+        _performanceDrilldownError = null;
+        var resourceId = AppState.SelectedInstance.ResourceId;
+
+        SetAllLoading(true);
+        StateHasChanged();
+
+        try
+        {
+            await Task.WhenAll(
+                LoadSummary(resourceId),
+                LoadRequests(resourceId),
+                LoadDependencies(resourceId),
+                LoadExceptions(resourceId),
+                LoadPageViews(resourceId),
+                LoadPageSpeed(resourceId),
+                LoadAvailability(resourceId),
+                LoadTraces(resourceId),
+                LoadFailures(resourceId),
+                LoadPerformance(resourceId)
+            );
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Some queries failed: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void SetAllLoading(bool value)
+    {
+        _loadingSummary = _loadingRequests = _loadingDependencies = _loadingExceptions =
+        _loadingPageViews = _loadingPageSpeed = _loadingAvailability = _loadingTraces =
+        _loadingFailures = _loadingPerformance = value;
+    }
+
+    private async Task LoadSummary(string resourceId)
+    {
+        try { _summary = await QueryService.GetSummaryAsync(resourceId, _timeRange); _summaryError = null; }
+        catch (Exception ex) { _summary = null; _summaryError = ex.Message; }
+        finally { _loadingSummary = false; StateHasChanged(); }
+    }
+
+    private async Task LoadRequests(string resourceId)
+    {
+        _failedRequestsRow = null;
+        _failedRequestDetails = [];
+        try { _requests = await QueryService.GetRequestsAsync(resourceId, _timeRange); _requestsError = null; }
+        catch (Exception ex) { _requests = []; _requestsError = ex.Message; }
+        finally { _loadingRequests = false; StateHasChanged(); }
+    }
+
+    private async Task LoadDependencies(string resourceId)
+    {
+        try { _dependencies = await QueryService.GetDependenciesAsync(resourceId, _timeRange); _dependenciesError = null; }
+        catch (Exception ex) { _dependencies = []; _dependenciesError = ex.Message; }
+        finally { _loadingDependencies = false; StateHasChanged(); }
+    }
+
+    private async Task LoadExceptions(string resourceId)
+    {
+        try { _exceptions = await QueryService.GetExceptionsAsync(resourceId, _timeRange); _exceptionsError = null; }
+        catch (Exception ex) { _exceptions = []; _exceptionsError = ex.Message; }
+        finally { _loadingExceptions = false; StateHasChanged(); }
+    }
+
+    private async Task LoadPageViews(string resourceId)
+    {
+        try { _pageViews = await QueryService.GetPageViewsAsync(resourceId, _timeRange); _pageViewsError = null; }
+        catch (Exception ex) { _pageViews = []; _pageViewsError = ex.Message; }
+        finally { _loadingPageViews = false; StateHasChanged(); }
+    }
+
+    private async Task LoadPageSpeed(string resourceId)
+    {
+        try { _pageSpeed = await QueryService.GetPageSpeedComparisonAsync(resourceId); _pageSpeedError = null; }
+        catch (Exception ex) { _pageSpeed = []; _pageSpeedError = ex.Message; }
+        finally { _loadingPageSpeed = false; StateHasChanged(); }
+    }
+
+    private async Task LoadAvailability(string resourceId)
+    {
+        try { _availability = await QueryService.GetAvailabilityAsync(resourceId, _timeRange); _availabilityError = null; }
+        catch (Exception ex) { _availability = []; _availabilityError = ex.Message; }
+        finally { _loadingAvailability = false; StateHasChanged(); }
+    }
+
+    private async Task LoadTraces(string resourceId)
+    {
+        try { _traces = await QueryService.GetTracesAsync(resourceId, _timeRange); _tracesError = null; }
+        catch (Exception ex) { _traces = []; _tracesError = ex.Message; }
+        finally { _loadingTraces = false; StateHasChanged(); }
+    }
+
+    private async Task LoadFailures(string resourceId)
+    {
+        _failureOccurrencesRow = null;
+        _failureOccurrences = [];
+        try { _failures = await QueryService.GetTopFailuresAsync(resourceId, _timeRange); _failuresError = null; }
+        catch (Exception ex) { _failures = []; _failuresError = ex.Message; }
+        finally { _loadingFailures = false; StateHasChanged(); }
+    }
+
+    private async Task LoadPerformance(string resourceId)
+    {
+        try { _performance = await QueryService.GetTopPerformanceAsync(resourceId, _timeRange); _performanceError = null; }
+        catch (Exception ex) { _performance = []; _performanceError = ex.Message; }
+        finally { _loadingPerformance = false; StateHasChanged(); }
+    }
+
+    public void Dispose()
+    {
+        AppState.OnChange -= OnStateChanged;
+    }
+}

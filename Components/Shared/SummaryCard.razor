@@ -1,0 +1,30 @@
+@if (Loading)
+{
+    <MudCard Elevation="2">
+        <MudCardContent>
+            <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="80px" />
+        </MudCardContent>
+    </MudCard>
+}
+else
+{
+    <MudCard Elevation="2">
+        <MudCardContent>
+            <MudStack Row="true" AlignItems="AlignItems.Center">
+                <MudIcon Icon="@Icon" Color="@Color" Size="Size.Large" Class="mr-3" />
+                <div>
+                    <MudText Typo="Typo.h5" Color="@Color">@Value</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@Title</MudText>
+                </div>
+            </MudStack>
+        </MudCardContent>
+    </MudCard>
+}
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Info;
+    [Parameter] public Color Color { get; set; } = Color.Primary;
+    [Parameter] public bool Loading { get; set; }
+}

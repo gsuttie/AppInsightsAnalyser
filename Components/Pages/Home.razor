@@ -1,0 +1,155 @@
+@page "/"
+@inject AzureResourceService AzureService
+@inject AppStateService AppState
+@inject NavigationManager Nav
+
+<PageTitle>AppInsights Analyser — Home</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-8">
+    <MudPaper Elevation="3" Class="pa-6">
+        <MudText Typo="Typo.h4" GutterBottom="true">
+            <MudIcon Icon="@Icons.Material.Filled.Insights" Class="mr-2" />
+            Application Insights Analyser
+        </MudText>
+        <MudText Typo="Typo.subtitle1" Class="mb-6" Color="Color.Secondary">
+            Select an Azure subscription and Application Insights instance to begin.
+        </MudText>
+
+        @if (_errorMessage is not null)
+        {
+            <MudAlert Severity="Severity.Error" Class="mb-4" ShowCloseIcon="true" CloseIconClicked="@(() => _errorMessage = null)">
+                @_errorMessage
+            </MudAlert>
+        }
+
+        <!-- Step 1: Subscription -->
+        <MudText Typo="Typo.h6" Class="mb-2">Step 1: Select Subscription</MudText>
+
+        @if (_loadingSubscriptions)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Loading subscriptions...</MudText>
+        }
+        else
+        {
+            <MudSelect T="string" Label="Subscription"
+                       Value="_selectedSubId"
+                       ValueChanged="@OnSubscriptionChanged"
+                       Variant="Variant.Outlined" Class="mb-4"
+                       Disabled="@(_subscriptions.Count == 0)"
+                       AdornmentIcon="@Icons.Material.Filled.Subscriptions">
+                @foreach (var sub in _subscriptions)
+                {
+                    <MudSelectItem T="string" Value="@sub.Id">@sub.Name</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        <!-- Step 2: App Insights Instance -->
+        @if (_selectedSubId is not null)
+        {
+            <MudDivider Class="mb-4" />
+            <MudText Typo="Typo.h6" Class="mb-2">Step 2: Select Application Insights Instance</MudText>
+
+            @if (_loadingInstances)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Secondary" Class="mb-4" />
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Loading App Insights instances...</MudText>
+            }
+            else if (_instances.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Class="mb-4">
+                    No Application Insights instances found in this subscription.
+                </MudAlert>
+            }
+            else
+            {
+                <MudSelect T="AppInsightsInstance" Label="Application Insights Instance"
+                           @bind-Value="_selectedInstance"
+                           Variant="Variant.Outlined" Class="mb-6"
+                           AdornmentIcon="@Icons.Material.Filled.MonitorHeart"
+                           ToStringFunc="@(i => i?.Name ?? "")">
+                    @foreach (var inst in _instances)
+                    {
+                        <MudSelectItem T="AppInsightsInstance" Value="@inst">
+                            @inst.Name <MudText Typo="Typo.caption" Inline="true" Color="Color.Secondary"> — @inst.Location</MudText>
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                           StartIcon="@Icons.Material.Filled.Dashboard"
+                           Disabled="@(_selectedInstance is null)"
+                           OnClick="@OpenDashboard">
+                    Open Dashboard
+                </MudButton>
+            }
+        }
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private List<SubscriptionInfo> _subscriptions = [];
+    private List<AppInsightsInstance> _instances = [];
+    private string? _selectedSubId;
+    private AppInsightsInstance? _selectedInstance;
+    private bool _loadingSubscriptions = true;
+    private bool _loadingInstances;
+    private string? _errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _subscriptions = await AzureService.GetSubscriptionsAsync();
+
+            if (_subscriptions.Count == 0)
+            {
+                _errorMessage = "No subscriptions found. Ensure you are logged in via 'az login' and have access to Azure subscriptions.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load subscriptions: {ex.Message}. Please run 'az login' and try again.";
+        }
+        finally
+        {
+            _loadingSubscriptions = false;
+        }
+    }
+
+    private async Task OnSubscriptionChanged(string subId)
+    {
+        _selectedSubId = subId;
+        _selectedInstance = null;
+        _instances = [];
+        _errorMessage = null;
+
+        var sub = _subscriptions.FirstOrDefault(s => s.Id == subId);
+        if (sub is not null)
+            AppState.SetSubscription(sub.Id, sub.Name);
+
+        _loadingInstances = true;
+        try
+        {
+            _instances = await AzureService.GetAppInsightsInstancesAsync(subId);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Failed to load App Insights instances: {ex.Message}";
+        }
+        finally
+        {
+            _loadingInstances = false;
+        }
+    }
+
+    private void OpenDashboard()
+    {
+        if (_selectedInstance is not null)
+        {
+            AppState.SetInstance(_selectedInstance);
+            Nav.NavigateTo("/dashboard");
+        }
+    }
+}

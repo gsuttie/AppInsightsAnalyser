@@ -1,0 +1,98 @@
+@inherits LayoutComponentBase
+@inject AppStateService AppState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1" Color="Color.Primary">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
+                       OnClick="@(() => _drawerOpen = !_drawerOpen)" />
+        <MudText Typo="Typo.h6" Class="ml-2">AppInsights Analyser</MudText>
+        <MudSpacer />
+        @if (AppState.SelectedInstance is not null)
+        {
+            <MudChip T="string" Color="Color.Secondary" Size="Size.Small" Class="mr-1">
+                @AppState.SelectedSubscriptionName
+            </MudChip>
+            <MudChip T="string" Color="Color.Info" Size="Size.Small" Class="mr-2">
+                @AppState.SelectedInstance.Name
+            </MudChip>
+        }
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="2" Variant="DrawerVariant.Responsive"
+               ClipMode="DrawerClipMode.Always">
+        <MudDrawerHeader>
+            <MudText Typo="Typo.subtitle1"><strong>Navigation</strong></MudText>
+        </MudDrawerHeader>
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All"
+                        Icon="@Icons.Material.Filled.Home">
+                Home
+            </MudNavLink>
+
+            @if (AppState.SelectedInstance is not null)
+            {
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.caption" Class="px-4 mud-text-secondary">Dashboard</MudText>
+
+                @foreach (var (section, label, icon) in _sections)
+                {
+                    <MudNavLink Icon="@icon"
+                                Class="@(AppState.ActiveSection == section ? "nav-link-active" : "")"
+                                OnClick="@(() => NavigateTo(section))">
+                        @label
+                    </MudNavLink>
+                }
+            }
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent Class="pt-4">
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private static readonly (string Section, string Label, string Icon)[] _sections =
+    [
+        ("overview",     "Overview",     Icons.Material.Filled.Dashboard),
+        ("requests",     "Requests",     Icons.Material.Filled.Http),
+        ("dependencies", "Dependencies", Icons.Material.Filled.AccountTree),
+        ("exceptions",   "Exceptions",   Icons.Material.Filled.BugReport),
+        ("page-views",   "Page Views",   Icons.Material.Filled.Visibility),
+        ("page-speed",   "Page Speed",   Icons.Material.Filled.Timer),
+        ("availability", "Availability", Icons.Material.Filled.CheckCircle),
+        ("traces",       "Traces",       Icons.Material.Filled.List),
+        ("failures",     "Top Failures", Icons.Material.Filled.Error),
+        ("performance",  "Performance",  Icons.Material.Filled.Speed),
+    ];
+
+    protected override void OnInitialized()
+    {
+        AppState.OnChange += OnStateChanged;
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void NavigateTo(string section)
+    {
+        AppState.SetSection(section);
+        Nav.NavigateTo("/dashboard");
+    }
+
+    public void Dispose()
+    {
+        AppState.OnChange -= OnStateChanged;
+    }
+}

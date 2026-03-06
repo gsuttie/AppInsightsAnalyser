@@ -1,0 +1,8 @@
+<MudStack AlignItems="AlignItems.Center" Class="py-8">
+    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" />
+    <MudText Typo="Typo.body1" Color="Color.Secondary">@Message</MudText>
+</MudStack>
+
+@code {
+    [Parameter] public string Message { get; set; } = "No data found for the selected time range.";
+}
