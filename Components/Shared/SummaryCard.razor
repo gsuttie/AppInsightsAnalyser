@@ -1,6 +1,6 @@
 @if (Loading)
 {
-    <MudCard Elevation="2">
+    <MudCard Elevation="2" Class="summary-card">
         <MudCardContent>
             <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="80px" />
         </MudCardContent>
@@ -8,13 +8,15 @@
 }
 else
 {
-    <MudCard Elevation="2">
-        <MudCardContent>
+    <MudCard Elevation="2" Class="@($"summary-card summary-card-{ColorName}")">
+        <MudCardContent Class="pa-4">
             <MudStack Row="true" AlignItems="AlignItems.Center">
-                <MudIcon Icon="@Icon" Color="@Color" Size="Size.Large" Class="mr-3" />
-                <div>
-                    <MudText Typo="Typo.h5" Color="@Color">@Value</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">@Title</MudText>
+                <div style="background:@IconBackground;border-radius:10px;width:48px;height:48px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <MudIcon Icon="@Icon" Color="@Color" Size="Size.Medium" />
+                </div>
+                <div class="ml-3">
+                    <MudText Typo="Typo.h5" Style="font-weight:700;line-height:1.2;">@Value</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Style="font-size:0.8rem;margin-top:2px;">@Title</MudText>
                 </div>
             </MudStack>
         </MudCardContent>
@@ -27,4 +29,22 @@ else
     [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Info;
     [Parameter] public Color Color { get; set; } = Color.Primary;
     [Parameter] public bool Loading { get; set; }
+
+    private string ColorName => Color switch
+    {
+        Color.Error   => "error",
+        Color.Success => "success",
+        Color.Info    => "info",
+        Color.Warning => "warning",
+        _             => "primary"
+    };
+
+    private string IconBackground => Color switch
+    {
+        Color.Error   => "rgba(211,47,47,0.08)",
+        Color.Success => "rgba(56,142,60,0.08)",
+        Color.Info    => "rgba(2,136,209,0.08)",
+        Color.Warning => "rgba(245,124,0,0.08)",
+        _             => "rgba(21,101,192,0.08)"
+    };
 }

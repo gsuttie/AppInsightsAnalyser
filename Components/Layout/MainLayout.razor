@@ -3,33 +3,49 @@
 @inject NavigationManager Nav
 @implements IDisposable
 
-<MudThemeProvider />
+<MudThemeProvider Theme="_theme" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1" Color="Color.Primary">
+    <MudAppBar Elevation="2" Color="Color.Primary" Dense="false">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
                        OnClick="@(() => _drawerOpen = !_drawerOpen)" />
-        <MudText Typo="Typo.h6" Class="ml-2">AppInsights Analyser</MudText>
+        <MudIcon Icon="@Icons.Material.Filled.Insights" Class="ml-1 mr-2" />
+        <MudText Typo="Typo.h6" Class="appbar-title">AppInsights Analyser</MudText>
         <MudSpacer />
         @if (AppState.SelectedInstance is not null)
         {
-            <MudChip T="string" Color="Color.Secondary" Size="Size.Small" Class="mr-1">
-                @AppState.SelectedSubscriptionName
-            </MudChip>
-            <MudChip T="string" Color="Color.Info" Size="Size.Small" Class="mr-2">
-                @AppState.SelectedInstance.Name
-            </MudChip>
+            <MudTooltip Text="@AppState.SelectedSubscriptionName">
+                <MudChip T="string" Icon="@Icons.Material.Filled.AccountTree"
+                         Color="Color.Default" Variant="Variant.Filled"
+                         Size="Size.Small" Class="instance-chip mr-1"
+                         Style="background:rgba(255,255,255,0.18);color:white;max-width:160px;overflow:hidden;text-overflow:ellipsis;">
+                    @AppState.SelectedSubscriptionName
+                </MudChip>
+            </MudTooltip>
+            <MudTooltip Text="@AppState.SelectedInstance.Name">
+                <MudChip T="string" Icon="@Icons.Material.Filled.MonitorHeart"
+                         Color="Color.Default" Variant="Variant.Filled"
+                         Size="Size.Small" Class="instance-chip mr-3"
+                         Style="background:rgba(255,255,255,0.28);color:white;max-width:160px;overflow:hidden;text-overflow:ellipsis;">
+                    @AppState.SelectedInstance.Name
+                </MudChip>
+            </MudTooltip>
         }
     </MudAppBar>
 
-    <MudDrawer @bind-Open="_drawerOpen" Elevation="2" Variant="DrawerVariant.Responsive"
-               ClipMode="DrawerClipMode.Always">
-        <MudDrawerHeader>
-            <MudText Typo="Typo.subtitle1"><strong>Navigation</strong></MudText>
-        </MudDrawerHeader>
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="1" Variant="DrawerVariant.Responsive"
+               ClipMode="DrawerClipMode.Always" Width="230px">
+
+        <div class="drawer-brand">
+            <div class="drawer-brand-icon">
+                <MudIcon Icon="@Icons.Material.Filled.Insights" Size="Size.Small" />
+            </div>
+            <MudText Typo="Typo.subtitle2" Style="font-weight:700;color:#1565c0;">AppInsights</MudText>
+        </div>
+
         <MudNavMenu>
             <MudNavLink Href="/" Match="NavLinkMatch.All"
                         Icon="@Icons.Material.Filled.Home">
@@ -39,7 +55,10 @@
             @if (AppState.SelectedInstance is not null)
             {
                 <MudDivider Class="my-2" />
-                <MudText Typo="Typo.caption" Class="px-4 mud-text-secondary">Dashboard</MudText>
+                <MudText Typo="Typo.overline" Class="px-4 mb-1"
+                         Style="color:#9e9e9e;font-size:0.68rem;letter-spacing:0.08em;">
+                    DASHBOARD
+                </MudText>
 
                 @foreach (var (section, label, icon) in _sections)
                 {
@@ -60,6 +79,38 @@
 
 @code {
     private bool _drawerOpen = true;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary        = "#1565c0",
+            PrimaryDarken  = "#003c8f",
+            PrimaryLighten = "#5e92f3",
+            Secondary      = "#42a5f5",
+            AppbarBackground = "#1565c0",
+            DrawerBackground = "#ffffff",
+            DrawerText     = "#37474f",
+            Background     = "#f4f6f9",
+            Surface        = "#ffffff",
+            TableHover     = "rgba(21,101,192,0.05)",
+            TableLines     = "#eeeeee",
+            Divider        = "#e0e0e0",
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["Roboto", "sans-serif"],
+            },
+            H5 = new H5Typography { FontWeight = "700" },
+            H6 = new H6Typography { FontWeight = "600" },
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DrawerWidthLeft = "230px",
+        }
+    };
 
     private static readonly (string Section, string Label, string Icon)[] _sections =
     [

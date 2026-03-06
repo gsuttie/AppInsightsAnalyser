@@ -6,13 +6,22 @@
 <PageTitle>AppInsights Analyser — Home</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Medium" Class="mt-8">
-    <MudPaper Elevation="3" Class="pa-6">
-        <MudText Typo="Typo.h4" GutterBottom="true">
-            <MudIcon Icon="@Icons.Material.Filled.Insights" Class="mr-2" />
-            Application Insights Analyser
+
+    <div class="home-hero">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Insights" Style="font-size:2.2rem;" />
+            <MudText Typo="Typo.h4" Style="font-weight:700;color:white;" Class="ml-2">
+                AppInsights Analyser
+            </MudText>
+        </MudStack>
+        <MudText Typo="Typo.subtitle1" Style="color:rgba(255,255,255,0.85);">
+            Connect to your Azure Application Insights instances and explore live telemetry dashboards — no API keys required.
         </MudText>
-        <MudText Typo="Typo.subtitle1" Class="mb-6" Color="Color.Secondary">
-            Select an Azure subscription and Application Insights instance to begin.
+    </div>
+
+    <MudPaper Elevation="3" Class="pa-6" Style="border-radius:12px;">
+        <MudText Typo="Typo.subtitle1" Class="mb-5" Color="Color.Secondary">
+            Select a subscription and Application Insights instance to begin.
         </MudText>
 
         @if (_errorMessage is not null)
@@ -23,7 +32,10 @@
         }
 
         <!-- Step 1: Subscription -->
-        <MudText Typo="Typo.h6" Class="mb-2">Step 1: Select Subscription</MudText>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudAvatar Color="Color.Primary" Size="Size.Small" Style="font-size:0.8rem;font-weight:700;">1</MudAvatar>
+            <MudText Typo="Typo.h6" Class="ml-2">Select Subscription</MudText>
+        </MudStack>
 
         @if (_loadingSubscriptions)
         {
@@ -49,7 +61,10 @@
         @if (_selectedSubId is not null)
         {
             <MudDivider Class="mb-4" />
-            <MudText Typo="Typo.h6" Class="mb-2">Step 2: Select Application Insights Instance</MudText>
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudAvatar Color="Color.Primary" Size="Size.Small" Style="font-size:0.8rem;font-weight:700;">2</MudAvatar>
+                <MudText Typo="Typo.h6" Class="ml-2">Select Application Insights Instance</MudText>
+            </MudStack>
 
             @if (_loadingInstances)
             {
